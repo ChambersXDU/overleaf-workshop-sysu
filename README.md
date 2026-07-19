@@ -1,56 +1,56 @@
 # Overleaf Workshop (SYSU)
 
-Fork of [Overleaf Workshop](https://github.com/overleaf-workshop/Overleaf-Workshop) adapted for Sun Yat-sen University LaTeX:
+基于 [Overleaf Workshop](https://github.com/overleaf-workshop/Overleaf-Workshop) 适配中山大学 LaTeX 平台的版本：
 
 **https://latex.sysu.edu.cn**
 
-Extension ID: `cham.overleaf-workshop-sysu`
+扩展标识：`cham.overleaf-workshop-sysu`
 
 ---
 
-## Installation
+## 安装
 
-1. Open the [Releases](https://github.com/ChambersXDU/overleaf-workshop-sysu/releases) page and download the latest `.vsix`.
-2. In VS Code / Cursor: **Extensions: Install from VSIX...** and select the downloaded file.
-3. Disable or uninstall the marketplace extension `iamhyc.overleaf-workshop` if it is installed, to avoid command conflicts.
-4. Reload the window after installation.
+1. 打开本仓库 [Releases](https://github.com/ChambersXDU/overleaf-workshop-sysu/releases) 页面，下载最新的 `.vsix` 文件。
+2. 在 VS Code / Cursor 中执行 **Extensions: Install from VSIX...**，选择刚下载的文件。
+3. 若已安装商店版 `iamhyc.overleaf-workshop`，请先禁用或卸载，以免命令冲突。
+4. 安装完成后重新加载窗口。
 
 ---
 
-## Usage
+## 使用
 
-### Login
+### 登录
 
-1. Sign in to https://latex.sysu.edu.cn in a browser.
-2. Open Developer Tools (F12) → **Network**, then open or refresh the project list.
-3. Select a request to `/project` and copy the session cookie, for example:
+1. 在浏览器中登录 https://latex.sysu.edu.cn 。
+2. 打开开发者工具（F12）→ **Network**，打开或刷新项目列表页。
+3. 选中对 `/project` 的请求，复制会话 Cookie，例如：
 
    ```text
    overleaf.sid=...
    ```
 
-4. In the extension, add server `https://latex.sysu.edu.cn` and use **Login with Cookies**.
+4. 在扩展中添加服务器地址 `https://latex.sysu.edu.cn`，使用 **Login with Cookies** 完成登录。
 
-### Open a project
+### 打开项目
 
-Select a project in the Overleaf Workshop sidebar to open it in the editor.
+在侧栏 Overleaf Workshop 中选择项目即可打开。
 
-**Note:** Direct open uses a virtual file system (`overleaf-workshop://...`). Integrated terminals and tools that only access local paths cannot see these files. For local paths (terminal, AI assistants, LaTeX Workshop, etc.), use **Open Project Locally...** on the project and choose a directory on disk.
-
----
-
-## Changes relative to upstream
-
-| Area | Change |
-|------|--------|
-| Connectivity | Prefer Socket.IO v2 handshake with `?projectId=` (required by latex.sysu.edu.cn). |
-| HTTP client | Patch `xmlhttprequest` so `Host` does not include default port `:443` (avoids ALB connection reset). |
-| Packaging | Published as a separate extension id for side-by-side installation. |
-
-See `src/api/socketio.ts` and `patches/xmlhttprequest+1.8.0.patch`.
+**说明：** 直接打开使用的是虚拟文件系统（`overleaf-workshop://...`），集成终端及仅能访问本地路径的工具无法看到这些文件。若需本地路径（终端、AI 辅助、LaTeX Workshop 等），请在项目上右键选择 **Open Project Locally...**，同步到本机目录后再打开。
 
 ---
 
-## License
+## 相对上游的修改
 
-AGPL-3.0, same as upstream. Upstream project: [overleaf-workshop/Overleaf-Workshop](https://github.com/overleaf-workshop/Overleaf-Workshop).
+| 类别 | 说明 |
+|------|------|
+| 连接协议 | 默认使用 Socket.IO v2 握手（URL 携带 `?projectId=`），以适配 latex.sysu.edu.cn。 |
+| HTTP 客户端 | 修补 `xmlhttprequest`，避免 `Host` 头携带默认端口 `:443`（防止 ALB 中断连接）。 |
+| 发布标识 | 使用独立扩展 ID，便于与商店版区分安装。 |
+
+相关代码：`src/api/socketio.ts`、`patches/xmlhttprequest+1.8.0.patch`。
+
+---
+
+## 许可
+
+AGPL-3.0，与上游一致。上游项目：[overleaf-workshop/Overleaf-Workshop](https://github.com/overleaf-workshop/Overleaf-Workshop)。
