@@ -75,7 +75,12 @@ export interface EventsHandler {
 type ConnectionScheme = 'Alt' | 'v1' | 'v2';
 
 export class SocketIOAPI {
-    private scheme: ConnectionScheme = 'v1';
+    /**
+     * Prefer v2 (handshake with ?projectId=...) by default.
+     * Required by modern self-hosted instances such as latex.sysu.edu.cn;
+     * older servers reject v2 and we fall back to v1 automatically.
+     */
+    private scheme: ConnectionScheme = 'v2';
     private record?: Promise<ProjectEntity>;
     private _handlers: Array<EventsHandler> = [];
     /** Track EventBus listeners for cleanup to prevent MaxListenersExceededWarning */
@@ -184,9 +189,15 @@ export class SocketIOAPI {
             console.log('SocketIOAPI: forceDisconnect', message);
         });
         this.socket.on('connectionRejected', (err:any) => {
-            console.log('SocketIOAPI: connectionRejected.', err?.message || err);
-            // If v2 also gets rejected, fall back to v1 rather than staying stuck
-            if (this.scheme === 'v2') {
+            const message = err?.message || String(err || '');
+            console.log('SocketIOAPI: connectionRejected.', message);
+            // Prefer the scheme the server asks for:
+            // - "missing/bad ?projectId=..." → need v2 handshake
+            // - other v2 rejections → fall back to classic v1
+            if (/projectId/i.test(message)) {
+                console.log('SocketIOAPI: server requires projectId handshake, switching to v2');
+                this.scheme = 'v2';
+            } else if (this.scheme === 'v2') {
                 console.log('SocketIOAPI: v2 rejected, falling back to v1');
                 this.scheme = 'v1';
             }
@@ -204,9 +215,21 @@ export class SocketIOAPI {
 
         if (this.scheme==='v2') {
             this.record = new Promise(resolve => {
-                this.socket.on('joinProjectResponse', (res:any) => {
-                    const publicId = res.publicId as string;
-                    const project = res.project as ProjectEntity;
+                this.socket.on('joinProjectResponse', (res:any, maybeProject?:any) => {
+                    // Object form: { publicId, project }
+                    // Positional form: (publicId, project, ...)
+                    let publicId: string;
+                    let project: ProjectEntity;
+                    if (res && typeof res === 'object' && (res.project || res.publicId)) {
+                        publicId = res.publicId as string;
+                        project = res.project as ProjectEntity;
+                    } else if (maybeProject) {
+                        publicId = res as string;
+                        project = maybeProject as ProjectEntity;
+                    } else {
+                        publicId = '';
+                        project = res as ProjectEntity;
+                    }
                     EventBus.fire('socketioConnectedEvent', {publicId});
                     resolve(project);
                 });
@@ -346,10 +369,11 @@ export class SocketIOAPI {
      * @returns {Promise}
      */
     async joinProject(project_id:string): Promise<ProjectEntity> {
+        // Self-hosted campus instances can be slower off-campus; 5s was too tight.
         const timeoutPromise: Promise<ProjectEntity> = new Promise((_, reject) => {
             setTimeout(() => {
                 reject('timeout');
-            }, 5000);
+            }, 15000);
         });
 
         switch(this.scheme) {
@@ -363,15 +387,26 @@ export class SocketIOAPI {
                 });
                 const rejectPromise = new Promise((_, reject) => {
                     this.socket.on('connectionRejected', (err:any) => {
-                        // Only fall back to v2 if we haven't already tried it;
-                        // otherwise let the outer retry logic handle backoff
-                        this.scheme = 'v2';
-                        reject(err.message);
+                        const message = err?.message || String(err || '');
+                        // Servers that require ?projectId= on handshake (e.g. SYSU LaTeX)
+                        if (/projectId/i.test(message) || this.scheme === 'v1') {
+                            this.scheme = 'v2';
+                        }
+                        reject(message);
                     });
                 });
                 return Promise.race([joinPromise, rejectPromise, timeoutPromise]);
             case 'v2':
-                return Promise.race([this.record!, timeoutPromise]);
+                const v2RejectPromise: Promise<ProjectEntity> = new Promise((_, reject) => {
+                    this.socket.on('connectionRejected', (err:any) => {
+                        const message = err?.message || String(err || '');
+                        if (!/projectId/i.test(message)) {
+                            this.scheme = 'v1';
+                        }
+                        reject(message);
+                    });
+                });
+                return Promise.race([this.record!, timeoutPromise, v2RejectPromise]);
         }
     }
 

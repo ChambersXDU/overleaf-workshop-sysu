@@ -1,87 +1,79 @@
-# Overleaf Workshop
+# Overleaf Workshop (SYSU)
 
-[![GitHub Repo stars](https://img.shields.io/github/stars/overleaf-workshop/Overleaf-Workshop)](https://github.com/overleaf-workshop/Overleaf-Workshop)
-[![version](https://vsmarketplacebadges.dev/version-short/iamhyc.overleaf-workshop.jpg)](https://marketplace.visualstudio.com/items?itemName=iamhyc.overleaf-workshop)
-[![installs](https://vsmarketplacebadges.dev/installs-short/iamhyc.overleaf-workshop.jpg)](https://marketplace.visualstudio.com/items?itemName=iamhyc.overleaf-workshop)
-[![rating](https://vsmarketplacebadges.dev/rating-short/iamhyc.overleaf-workshop.jpg)](https://marketplace.visualstudio.com/items?itemName=iamhyc.overleaf-workshop&ssr=false#review-details)
+基于 [Overleaf Workshop](https://github.com/overleaf-workshop/Overleaf-Workshop) 的个人维护版本，用于连接中山大学 LaTeX 平台：
 
-Open Overleaf (ShareLatex) projects in VSCode, with full collaboration support.
+**https://latex.sysu.edu.cn**
 
-### User Guide
+商店原版常见问题：Cookie 能登录、能看到项目列表，但一点进项目就加载失败。
 
-The full user guide is available at [GitHub Wiki](https://github.com/overleaf-workshop/Overleaf-Workshop/wiki).
+---
 
-### Features
+## 改了什么
 
-> [!NOTE]
-> For SSO login or captcha enabled servers like `https://www.overleaf.com`, please use "**Login with Cookies**" method.
-> For more details, please refer to [How to Login with Cookies](#how-to-login-with-cookies).
+1. **Socket 握手 Host 修复**  
+   老依赖会发 `Host: latex.sysu.edu.cn:443`，学校 ALB 会直接掐连接（`socket hang up`）。  
+   补丁：`patches/xmlhttprequest+1.8.0.patch`
 
-- Login Server, Open Projects and Edit Files
+2. **默认使用 v2 连接**  
+   学校实例要求握手 URL 带 `?projectId=...`，否则拒绝进项目。  
+   改动：`src/api/socketio.ts`
 
-    <img src="https://raw.githubusercontent.com/overleaf-workshop/Overleaf-Workshop/master/docs/assets/demo01-login.gif" height=400px/>
+3. **打包标识**  
+   扩展 ID：`cham.overleaf-workshop-sysu`，避免和商店版冲突。
 
-- On-the-fly Compiling and Previewing
-  > <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>B</kbd> to compile, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> preview.
+---
 
-    <img src="https://raw.githubusercontent.com/overleaf-workshop/Overleaf-Workshop/master/docs/assets/demo03-synctex.gif" height=400px/>
+## 安装
 
-- SyncTeX and Reverse SyncTeX
-  > <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>J</kbd> to jump to PDF.
-  > Double click on PDF to jump to source code
+### 方式 A：用 Release 里的 VSIX（推荐）
 
-- Chat with Collaborators
+1. 打开本仓库 GitHub **Releases**，下载最新 `.vsix`
+2. VS Code：`Cmd+Shift+P` → **Extensions: Install from VSIX...**
+3. 建议先**禁用/卸载**商店版 `Overleaf Workshop`
 
-    <img src="https://raw.githubusercontent.com/overleaf-workshop/Overleaf-Workshop/master/docs/assets/demo06-chat.gif" height=400px/>
+### 方式 B：本地打包
 
-- Open Project Locally, Compile/Preview with [LaTeX-Workshop](https://github.com/James-Yu/LaTeX-Workshop)
+```bash
+npm install
+npm run package
+# 生成 overleaf-workshop-sysu-*.vsix
+```
 
-    <img src="https://raw.githubusercontent.com/overleaf-workshop/Overleaf-Workshop/master/docs/assets/demo07-local.gif" height=400px/>
+---
 
-### How to Login with Cookies
+## 使用
 
-<img src="https://raw.githubusercontent.com/overleaf-workshop/Overleaf-Workshop/master/docs/assets/login_with_cookie.png" height=400px/>
+1. 浏览器登录 https://latex.sysu.edu.cn  
+2. F12 → Network → 点开 `/project` 请求 → 复制 Cookie 里的：
 
-In an already logged-in browser (Firefox for example):
+   ```text
+   overleaf.sid=...
+   ```
 
-1. Open "Developer Tools" (usually by pressing <kbd>F12</kbd>) and switch to the "Network" tab;
+3. 插件里添加服务器：`https://latex.sysu.edu.cn`  
+4. **Login with Cookies**，粘贴上面的 SID  
+5. 打开项目
 
-   Then, navigate to the Overleaf main page (e.g., `https://www.overleaf.com`) in the address bar.
+### 终端 / AI 要读写文件时
 
-2. Filter the listed items with `/project` and select the exact match.
+直接打开项目是**虚拟文件系统**，终端里看不到真实路径。  
+请在项目上右键 **Open Project Locally...**，同步到本机文件夹后再用终端或 AI。
 
-3. Check the "Cookie" under "Request Headers" of the selected item and copy its value to login.
-    > The format of the Cookie value would be like: `overleaf_session2=...` or `sharelatex.sid=...`
+---
 
-### Compatibility
+## 开发
 
-The following Overleaf (ShareLatex) Community Edition docker images provided on [Docker Hub](https://hub.docker.com/r/sharelatex/sharelatex) have been tested and verified to be compatible with this extension.
+```bash
+npm install
+npm run compile   # 编译一次
+npm run watch     # 改代码自动编译（tsc -watch）
+```
 
-- [x] [sharelatex/sharelatex:5.0.4](https://hub.docker.com/layers/sharelatex/sharelatex/5.0.4/images/sha256-429f6c4c02d5028172499aea347269220fb3505cbba2680f5c981057ffa59316?context=explore) (verified by [@Mingbo-Lee](https://github.com/Mingbo-Lee))
+推送到 `master` 后，GitHub Actions 会自动打包 VSIX（Artifacts）。  
+打 `v*` tag 时会创建 Release 并附带 `.vsix`。
 
-- [x] [sharelatex/sharelatex:4.2.4](https://hub.docker.com/layers/sharelatex/sharelatex/4.2.4/images/sha256-ac0fc6dbda5e82b9c979721773aa120ad3c4a63469b791b16c3711e0b937528c?context=explore)
+---
 
-- [x] [sharelatex/sharelatex:4.1](https://hub.docker.com/layers/sharelatex/sharelatex/4.1/images/sha256-3798913f1ada2da8b897f6b021972db7874982b23bef162019a9ac57471bcee8?context=explore) (verified by [@iamhyc](https://github.com/iamhyc))
+## 许可
 
-- [x] [sharelatex/sharelatex:3.5](https://hub.docker.com/layers/sharelatex/sharelatex/3.5/images/sha256-f97fa20e45cdbc688dc051cc4b0e0f4f91ae49fd12bded047d236ca389ad80ac?context=explore) (verified by [@iamhyc](https://github.com/iamhyc))
-
-- [ ] [sharelatex/sharelatex:3.4](https://hub.docker.com/layers/sharelatex/sharelatex/3.4/images/sha256-2a72e9b6343ed66f37ded4e6da8df81ed66e8af77e553b91bd19307f98badc7a?context=explore)
-
-- [ ] [sharelatex/sharelatex:3.3](https://hub.docker.com/layers/sharelatex/sharelatex/3.3/images/sha256-e1ec01563d259bbf290de4eb90dce201147c0aae5a07738c8c2e538f6d39d3a8?context=explore)
-
-- [ ] [sharelatex/sharelatex:3.2](https://hub.docker.com/layers/sharelatex/sharelatex/3.2/images/sha256-5db71af296f7c16910f8e8939e3841dad8c9ac48ea0a807ad47ca690087f44bf?context=explore)
-
-- [ ] [sharelatex/sharelatex:3.1](https://hub.docker.com/layers/sharelatex/sharelatex/3.1/images/sha256-5b9de1e65257cea4682c1654af06408af7f9c0e2122952d6791cdda45705e84e?context=explore)
-
-- [ ] [sharelatex/sharelatex:3.0](https://hub.docker.com/layers/sharelatex/sharelatex/3.0/images/sha256-a36e54c66ef62fdee736ce2229289aa261b44f083a9fd553cf8264500612db27?context=explore)
-
-### Development
-
-Please refer to the development guidance in [CONTRIBUTING.md](./CONTRIBUTING.md)
-
-### References
-
-- [Overleaf Official Logos](https://www.overleaf.com/for/partners/logos)
-- [Overleaf Web Route List](./docs/webapi.md)
-- [James-Yu/LaTeX-Workshop](https://github.com/James-Yu/LaTeX-Workshop)
-- [jlelong/vscode-latex-basics](https://github.com/jlelong/vscode-latex-basics/tags)
+与上游相同（AGPL-3.0）。感谢 [overleaf-workshop](https://github.com/overleaf-workshop/Overleaf-Workshop) 原作者。

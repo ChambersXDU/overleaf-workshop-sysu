@@ -1,0 +1,19 @@
+diff --git a/node_modules/xmlhttprequest/lib/XMLHttpRequest.js b/node_modules/xmlhttprequest/lib/XMLHttpRequest.js
+index 4893913..f014bbd 100644
+--- a/node_modules/xmlhttprequest/lib/XMLHttpRequest.js
++++ b/node_modules/xmlhttprequest/lib/XMLHttpRequest.js
+@@ -343,8 +343,12 @@ exports.XMLHttpRequest = function() {
+ 
+     // Set the Host header or the server may reject the request
+     headers.Host = host;
+-    if (!((ssl && port === 443) || port === 80)) {
+-      headers.Host += ":" + url.port;
++    // SYSU latex.sysu.edu.cn (and some ALBs): socket.io-client builds URLs with
++    // explicit :443, so port is the string "443". Strict === 443 fails and Host
++    // becomes "host:443". Combined with agent:false this causes socket hang up.
++    var portNum = Number(port);
++    if (!((ssl && portNum === 443) || portNum === 80)) {
++      headers.Host += ":" + portNum;
+     }
+ 
+     // Set Basic Auth if necessary

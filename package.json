@@ -1,14 +1,14 @@
 {
-  "name": "overleaf-workshop",
+  "name": "overleaf-workshop-sysu",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.15.10",
+  "version": "0.15.11",
   "icon": "resources/icons/app_icon.png",
   "author": {
     "name": "iamhyc",
     "email": "ychong@petalmail.com"
   },
-  "publisher": "iamhyc",
+  "publisher": "cham",
   "contributors": [
     {
       "name": "iamhyc",
@@ -47,10 +47,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/overleaf-workshop/overleaf-workshop"
+    "url": "https://github.com/ChambersXDU/overleaf-workshop-sysu"
   },
   "bugs": {
-    "url": "https://github.com/overleaf-workshop/overleaf-workshop/issues"
+    "url": "https://github.com/ChambersXDU/overleaf-workshop-sysu/issues"
   },
   "engines": {
     "vscode": "^1.80.0"
@@ -784,7 +784,8 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "package": "npm run compile && npx --yes @vscode/vsce package --no-rewrite-relative-links"
   },
   "dependencies": {
     "@unified-latex/unified-latex-prettier": "^1.8.3",

@@ -1,6 +1,6 @@
 {
-    "extension.displayName": "Overleaf Workshop",
-    "extension.description": "Open Overleaf/ShareLaTex projects in VSCode, with full collaboration support.",
+    "extension.displayName": "Overleaf Workshop (SYSU)",
+    "extension.description": "Open Overleaf/ShareLaTeX projects in VSCode (personal build with latex.sysu.edu.cn fixes: Host:443 ALB hang-up + v2 projectId handshake).",
 
     "commands.remoteFileSystem.refreshLinkedFile.title": "Overleaf: Refresh File",
     "commands.remoteFileSystem.createLinkedFile.title": "Overleaf: Import File ...",
