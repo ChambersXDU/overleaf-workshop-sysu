@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -32,7 +32,11 @@ jobs:
         run: npm run compile
 
       - name: Package VSIX
-        run: npx --yes @vscode/vsce package --no-rewrite-relative-links
+        run: |
+          npx --yes @vscode/vsce package --no-rewrite-relative-links
+          ls -lh *.vsix
+          echo "VSIX_FILE=$(ls -1 *.vsix | head -n1)" >> "$GITHUB_ENV"
+          echo "VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
 
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v4
@@ -40,3 +44,18 @@ jobs:
           name: overleaf-workshop-sysu
           path: "*.vsix"
           if-no-files-found: error
+
+      # PR 只打包；push 到主分支时同步发到 Releases（方便下载）
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: v${{ env.VERSION }}
+          files: "*.vsix"
+          generate_release_notes: true
+          make_latest: true
+          # 同一版本再次 push 时更新该 Release 的附件
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
