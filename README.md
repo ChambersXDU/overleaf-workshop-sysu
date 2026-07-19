@@ -69,8 +69,10 @@ npm run compile   # 编译一次
 npm run watch     # 改代码自动编译（tsc -watch）
 ```
 
-推送到 `master` 后，GitHub Actions 会自动打包 VSIX（Artifacts）。  
-打 `v*` tag 时会创建 Release 并附带 `.vsix`。
+推送到 `master` 后，GitHub Actions 会：
+
+1. 打包 `.vsix`（Actions → Artifacts 里也能下）  
+2. **自动创建/更新 GitHub Release**（tag = `v` + `package.json` 的 version，例如 `v0.15.11`）
 
 ---
 
