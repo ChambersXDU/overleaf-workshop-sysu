@@ -2,7 +2,7 @@
   "name": "overleaf-workshop-sysu",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.15.11",
+  "version": "0.15.12",
   "icon": "resources/icons/app_icon.png",
   "author": {
     "name": "iamhyc",
@@ -527,6 +527,28 @@
           "default": true,
           "scope": "machine",
           "markdownDescription": "%configuration.formatWithLineBreak.enabled.markdownDescription%"
+        },
+        "overleaf-workshop.projectOpen.mode": {
+          "type": "string",
+          "enum": [
+            "prompt",
+            "local",
+            "virtual"
+          ],
+          "enumDescriptions": [
+            "%configuration.projectOpen.mode.prompt.description%",
+            "%configuration.projectOpen.mode.local.description%",
+            "%configuration.projectOpen.mode.virtual.description%"
+          ],
+          "default": "prompt",
+          "scope": "machine",
+          "markdownDescription": "%configuration.projectOpen.mode.markdownDescription%"
+        },
+        "overleaf-workshop.localProjects.rootPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "%configuration.localProjects.rootPath.markdownDescription%"
         }
       }
     },

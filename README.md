@@ -33,9 +33,24 @@
 
 ### 打开项目
 
-在侧栏 Overleaf Workshop 中选择项目即可打开。
+在侧栏选择「在当前窗口打开」时，默认会询问：
 
-**说明：** 直接打开使用的是虚拟文件系统（`overleaf-workshop://...`），集成终端及仅能访问本地路径的工具无法看到这些文件。若需本地路径（终端、AI 辅助、LaTeX Workshop 等），请在项目上右键选择 **Open Project Locally...**，同步到本机目录后再打开。
+- **在本地打开（推荐）**：同步到本机目录，终端与 AI 可访问文件  
+- **虚拟打开**：沿用原版远程虚拟工作区（终端无法直接访问）
+
+首次选择本地打开时，会提示指定一个**本地项目根目录**（写入设置，之后复用）。  
+项目会落在：
+
+```text
+{本地项目根目录}/{项目名称}/
+```
+
+可在设置中修改：
+
+| 设置项 | 含义 |
+|--------|------|
+| `overleaf-workshop.projectOpen.mode` | `prompt`（默认询问）/ `local`（始终本地）/ `virtual`（始终虚拟） |
+| `overleaf-workshop.localProjects.rootPath` | 本地项目根目录 |
 
 ---
 
@@ -45,9 +60,10 @@
 |------|------|
 | 连接协议 | 默认使用 Socket.IO v2 握手（URL 携带 `?projectId=`），以适配 latex.sysu.edu.cn。 |
 | HTTP 客户端 | 修补 `xmlhttprequest`，避免 `Host` 头携带默认端口 `:443`（防止 ALB 中断连接）。 |
+| 本地打开 | 打开项目时可询问并默认同步到配置的本地根目录。 |
 | 发布标识 | 使用独立扩展 ID，便于与商店版区分安装。 |
 
-相关代码：`src/api/socketio.ts`、`patches/xmlhttprequest+1.8.0.patch`。
+相关代码：`src/api/socketio.ts`、`src/core/projectManagerProvider.ts`、`patches/xmlhttprequest+1.8.0.patch`。
 
 ---
 

@@ -72,7 +72,7 @@ export class LocalReplicaSCMProvider extends BaseSCM {
         super(vfs, baseUri);
     }
 
-    private static sanitizeProjectFolderName(projectName: string): string {
+    public static sanitizeProjectFolderName(projectName: string): string {
         let sanitized = projectName;
         if (process.platform==='win32') {
             sanitized = projectName

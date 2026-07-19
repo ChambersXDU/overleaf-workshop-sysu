@@ -61,6 +61,11 @@
     "configuration.invisibleMode.chatMessageRefreshInterval.markdownDescription": "The interval (in seconds) to refresh the chat messages in invisible mode.",
     "configuration.invisibleMode.inactiveTimeout.markdownDescription": "The timeout (in seconds) to mark a online Collaborator as inactivate in invisible mode.",
     "configuration.formatWithLineBreak.enabled.markdownDescription": "Enable line breaks when formatting.",
+    "configuration.projectOpen.mode.markdownDescription": "How to open a project from the sidebar. **prompt**: ask each time; **local**: always open a local replica under the configured root; **virtual**: open the remote virtual workspace (original behavior).",
+    "configuration.projectOpen.mode.prompt.description": "Ask whether to open locally or virtually",
+    "configuration.projectOpen.mode.local.description": "Always open under the local projects root",
+    "configuration.projectOpen.mode.virtual.description": "Always open as a virtual remote workspace",
+    "configuration.localProjects.rootPath.markdownDescription": "Default absolute path for local project folders. When opening locally, projects are placed at `{rootPath}/{projectName}`. If empty, you will be asked to choose a folder once and the path will be saved here.",
 
     "views.overleaf-workshop.projectManager.name": "Hosts",
     "views.explorer.overleaf-workshop.projectHistory": "History",
