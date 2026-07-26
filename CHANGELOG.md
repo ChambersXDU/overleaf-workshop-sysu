@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.13] - 2026-07-26
+### Fixed
+- fix(api): file uploads never reached the server — undici fetch cannot serialize the npm `form-data` stream (multipart body was sent as `text/plain` without a boundary); switched to undici's own `FormData` + `Blob`. This is why files with content (copied in, written by scripts, or bulk-synced) silently never appeared on the server while folders and empty docs did.
+- fix(scm): local replica pushes were silently dropped after any remote pull — the bypass cache stayed misaligned once `onDidChange` echoes were removed (debdcb5); both cache sides are now aligned after every successful sync.
+- fix(scm): failed pushes are now retried — a failure no longer poisons the bypass cache with the content hash, and errors are surfaced as warnings instead of being swallowed.
+- fix(scm): startup sync is now bidirectional — local-only files/folders (created while disconnected) are uploaded; diverged files no longer get clobbered by the remote copy (local wins; the server keeps history, the local folder does not).
+- fix(scm): new files inside new folders no longer race the folder creation (missing remote parents are created first); external tool modifications (git, scripts, AI assistants) sync again via the file watcher; unjoined docs are joined on first write instead of dropping it.
+- fix(scm): binary files (PDF, images) with byte differences in invalid utf-8 ranges are no longer treated as identical (hash is computed over raw bytes).
+
+### Added
+- test: node-based unit test suite (`npm test`) covering the local replica sync scenarios and the upload API multipart format.
+- feat(scm): `**/*.spl` added to default sync ignore patterns.
+
 ## [0.15.10] - 2026-07-11
 ### Changed
 - fix: enhance connection resilience and fix TCP RST causing spurious connection lost (fixes #309)

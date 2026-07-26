@@ -2,7 +2,7 @@
   "name": "overleaf-workshop-sysu",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.15.12",
+  "version": "0.15.13",
   "icon": "resources/icons/app_icon.png",
   "author": {
     "name": "iamhyc",
@@ -803,9 +803,9 @@
     "update-l10n": "npx @vscode/l10n-dev export -o ./l10n ./src",
     "compile": "tsc -p ./ && cd views/chat-view && npm run build",
     "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js",
+    "test": "npm run test:unit",
+    "test:unit": "tsc -p ./ && mocha --require ./test/unit/bootstrap.js \"test/unit/**/*.test.js\" --timeout 20000",
     "prepare": "husky install",
     "package": "npm run compile && npx --yes @vscode/vsce package --no-rewrite-relative-links"
   },
