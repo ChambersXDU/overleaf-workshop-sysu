@@ -1,9 +1,18 @@
 # Github Actions Overview
 
-We use Github Actions to automate various tasks in this repository. The following workflows are currently enabled:
+Only one workflow is enabled in this repository:
 
-- **lock-threads.yml**: Locks closed issues and pull requests after a period of inactivity.
+- **release-vsix.yml**: Builds the extension and publishes the `.vsix` to
+  [GitHub Releases](https://github.com/ChambersXDU/overleaf-workshop-sysu/releases)
+  when a version tag (`v*`) is pushed. Can also be run manually via
+  *workflow_dispatch*.
 
-- **vsce-package.yml**: Call `vsce package` to create a temporary VSCode extension package when a Pull Request is created/updated on the `master` branch.
+Release procedure:
 
-- **vsce-publish.yml**: Call `vsce publish` to publish the VSCode extension to the VSCode Marketplace when version tag is pushed on the `master` branch.
+```bash
+# bump "version" in package.json, update CHANGELOG.md, commit, then:
+git tag v0.15.14
+git push origin master --tags
+```
+
+There are intentionally no scheduled workflows and no per-push/per-PR builds.
