@@ -53,6 +53,7 @@ class MemFS {
         this.root = root;
         this.writeCount = new Map(); // path -> number of writeFile calls
         this.failWrites = new Map(); // path -> {error, times}
+        this.failReadDirs = new Map(); // path -> {error, times}
     }
     _norm(p) { return p !== '/' && p.endsWith('/') ? p.slice(0, -1) : p; }
     _parent(p) { return posix.dirname(p); }
@@ -67,6 +68,7 @@ class MemFS {
         }
     }
     failNextWrite(p, error, times = 1) { this.failWrites.set(this._norm(p), { error, times }); }
+    failNextReadDir(p, error, times = 1) { this.failReadDirs.set(this._norm(p), { error, times }); }
     writes(p) { return this.writeCount.get(this._norm(p)) || 0; }
     has(p) { return this.entries.has(this._norm(p)); }
     read(p) {
@@ -94,6 +96,12 @@ class MemFS {
     }
     async readDirectory(p) {
         p = this._norm(p);
+        const fail = this.failReadDirs.get(p);
+        if (fail && fail.times > 0) {
+            fail.times -= 1;
+            if (fail.times === 0) { this.failReadDirs.delete(p); }
+            throw fail.error;
+        }
         const entry = this.entries.get(p);
         if (!entry || entry.type !== 'dir') { throw FileSystemError.FileNotFound(p); }
         const result = [];

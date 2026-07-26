@@ -222,11 +222,20 @@ export class LocalReplicaSCMProvider extends BaseSCM {
             // breadth-first search for the remote files
             const remoteFiles: [string,string][] = [];
             const remoteDirs = new Set<string>([root]);
+            const remoteListFailures: string[] = [];
             const queue: string[] = [root];
             while (queue.length!==0) {
                 const nextRoot = queue.shift();
                 const vfsUri = this.vfs.pathToUri(nextRoot!);
-                const items = await vscode.workspace.fs.readDirectory(vfsUri);
+                let items: [string, vscode.FileType][] = [];
+                try {
+                    items = await vscode.workspace.fs.readDirectory(vfsUri);
+                } catch (error) {
+                    // a failed listing must not abort the whole sync
+                    console.error(`Sync list "${nextRoot}" failed:`, error);
+                    remoteListFailures.push(nextRoot!);
+                    continue;
+                }
                 if (token.isCancellationRequested) { return undefined; }
                 //
                 for (const [name, type] of items) {
@@ -272,12 +281,19 @@ export class LocalReplicaSCMProvider extends BaseSCM {
             }
 
             const remoteFileSet = new Set(remoteFiles.map(([,relPath]) => relPath));
-            const localOnlyFiles = localFiles.filter(relPath => !remoteFileSet.has(relPath));
-            const failures: string[] = [];
+            // if any remote listing failed, the remote view is incomplete:
+            // do not treat unseen files as "local-only" (they may well exist
+            // remotely); a later reload retries the full sync
+            const remoteViewComplete = remoteListFailures.length===0;
+            const localOnlyFiles = remoteViewComplete
+                ? localFiles.filter(relPath => !remoteFileSet.has(relPath))
+                : [];
+            const failures: string[] = [...remoteListFailures];
 
             // create local-only folders on the remote side (parents first)
             for (const dirPath of localDirs) {
                 if (token.isCancellationRequested) { return false; }
+                if (!remoteViewComplete) { break; }
                 if (remoteDirs.has(dirPath)) { continue; }
                 try {
                     await vscode.workspace.fs.createDirectory(this.vfs.pathToUri(dirPath));
@@ -538,18 +554,22 @@ export class LocalReplicaSCMProvider extends BaseSCM {
 
     private async initWatch() {
         // write ".overleaf/settings.json" if not exist
-        const settingUri = vscode.Uri.joinPath(this.baseUri, '.overleaf/settings.json');
         try {
-            await vscode.workspace.fs.stat(settingUri);
+            const settingUri = vscode.Uri.joinPath(this.baseUri, '.overleaf/settings.json');
+            try {
+                await vscode.workspace.fs.stat(settingUri);
+            } catch (error) {
+                await vscode.workspace.fs.writeFile(settingUri, Buffer.from(
+                    JSON.stringify({
+                        'uri': this.vfs.origin.toString(),
+                        'serverName': this.vfs.serverName,
+                        'enableCompileNPreview': false,
+                        'projectName': this.vfs.projectName,
+                    }, null, 4)
+                ));
+            }
         } catch (error) {
-            await vscode.workspace.fs.writeFile(settingUri, Buffer.from(
-                JSON.stringify({
-                    'uri': this.vfs.origin.toString(),
-                    'serverName': this.vfs.serverName,
-                    'enableCompileNPreview': false,
-                    'projectName': this.vfs.projectName,
-                }, null, 4)
-            ));
+            console.error('Writing .overleaf/settings.json failed:', error);
         }
 
         this.vfsWatcher = vscode.workspace.createFileSystemWatcher(
@@ -558,7 +578,17 @@ export class LocalReplicaSCMProvider extends BaseSCM {
         this.localWatcher = vscode.workspace.createFileSystemWatcher(
             new vscode.RelativePattern( this.baseUri.path, '**/*' )
         );
-        await this.overwrite();
+        // the initial bulk sync must not prevent the live sync (watchers,
+        // save listener) from being registered — otherwise a single transient
+        // startup error would silently disable syncing for the whole session
+        try {
+            await this.overwrite();
+        } catch (error) {
+            console.error('Initial sync failed:', error);
+            vscode.window.showWarningMessage(
+                vscode.l10n.t('Initial sync failed. Live sync stays active; reload the window to retry the full sync.')
+            );
+        }
 
         // Push editor saves immediately; the watcher below covers changes made
         // by external tools (scripts, git, formatters, AI assistants, ...).

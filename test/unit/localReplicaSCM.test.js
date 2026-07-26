@@ -220,6 +220,36 @@ describe('LocalReplicaSCMProvider sync', function () {
         });
     });
 
+    describe('startup resilience (regression: one startup error killed sync for the session)', () => {
+        it('keeps live sync working when a remote sub-directory listing fails, and skips local-only uploads', async () => {
+            const t = await boot((localFS, remoteFS) => {
+                localFS.write(`${LOCAL_ROOT}/main.tex`, 'base');
+                remoteFS.write(`${REMOTE_ROOT}/main.tex`, 'base');
+                localFS.write(`${LOCAL_ROOT}/new.tex`, 'local only');
+                remoteFS.mkdir(`${REMOTE_ROOT}/broken`);
+                remoteFS.failNextReadDir(`${REMOTE_ROOT}/broken`, new Error('transient listing failure'));
+            });
+            // remote view was incomplete: must not guess that new.tex is local-only
+            assert.ok(!t.remoteFS.has(`${REMOTE_ROOT}/new.tex`), 'must not upload with an incomplete remote view');
+            assert.ok(vscode.__mock.state.warnings.length > 0, 'incomplete sync must be surfaced');
+            // live sync must still work afterwards
+            t.localFS.write(`${LOCAL_ROOT}/main.tex`, 'edited after failure');
+            await t.fireSave('/main.tex');
+            assert.strictEqual(t.remoteFS.read(`${REMOTE_ROOT}/main.tex`), 'edited after failure');
+        });
+
+        it('keeps live sync working even when the remote root listing fails', async () => {
+            const t = await boot((localFS, remoteFS) => {
+                localFS.write(`${LOCAL_ROOT}/main.tex`, 'hello');
+                remoteFS.write(`${REMOTE_ROOT}/main.tex`, 'hello');
+                remoteFS.failNextReadDir(REMOTE_ROOT, new Error('connection glitch'));
+            });
+            t.localFS.write(`${LOCAL_ROOT}/main.tex`, 'v2 after glitch');
+            await t.fireSave('/main.tex');
+            assert.strictEqual(t.remoteFS.read(`${REMOTE_ROOT}/main.tex`), 'v2 after glitch');
+        });
+    });
+
     describe('deletions', () => {
         it('propagates a local deletion and swallows its echo', async () => {
             const t = await boot((localFS, remoteFS) => {

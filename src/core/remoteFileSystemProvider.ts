@@ -546,6 +546,25 @@ export class VirtualFileSystem extends vscode.Disposable {
                     doc.localCache = undefined;
                 }
             },
+            onOtUpdateError: (...args:any[]) => {
+                // the server rejected one of our document updates (e.g., stale
+                // version after a missed event): drop all join state so the
+                // next write re-joins each doc and re-pushes its content
+                console.error('otUpdateError:', ...args);
+                const reset = (folder:FolderEntity) => {
+                    folder.docs.forEach((doc) => {
+                        doc.version = undefined;
+                        doc.localCache = undefined;
+                        doc.remoteCache = undefined;
+                    });
+                    folder.folders.forEach(reset);
+                };
+                const rootFolder = this.root?.rootFolder[0];
+                if (rootFolder) { reset(rootFolder); }
+                vscode.window.showWarningMessage(
+                    vscode.l10n.t('The server rejected a document update. Documents will re-sync on the next save.')
+                );
+            },
             onSpellCheckLanguageUpdated: (language:string) => {
                 if (this.root) {
                     this.root.spellCheckLanguage = language;

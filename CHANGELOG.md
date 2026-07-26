@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.14] - 2026-07-26
+### Fixed
+- fix(scm): a single transient error during the startup bulk sync (e.g., one failed remote directory listing) no longer kills the SCM for the whole session — failed listings are skipped, the live watchers/save listener are always registered, and an incomplete remote view disables the "upload local-only files" phase instead of mis-uploading.
+- fix(vfs): listen to `otUpdateError` — when the server rejects a document update, all docs drop their join state and re-join (and re-push) on the next write, instead of silently diverging.
+
 ## [0.15.13] - 2026-07-26
 ### Fixed
 - fix(api): file uploads never reached the server — undici fetch cannot serialize the npm `form-data` stream (multipart body was sent as `text/plain` without a boundary); switched to undici's own `FormData` + `Blob`. This is why files with content (copied in, written by scripts, or bulk-synced) silently never appeared on the server while folders and empty docs did.

@@ -59,6 +59,7 @@ export interface EventsHandler {
     onFileRemoved?: (entityId:string) => void,
     onFileMoved?: (entityId:string, newParentFolderId:string) => void,
     onFileChanged?: (update:UpdateSchema) => void,
+    onOtUpdateError?: (...args:any[]) => void,
     //
     onDisconnected?: () => void,
     onConnectionAccepted?: (publicId:string) => void,
@@ -297,6 +298,11 @@ export class SocketIOAPI {
                 case handlers.onFileChanged:
                     this.socket.on('otUpdateApplied', (update: UpdateSchema) => {
                         handler(update);
+                    });
+                    break;
+                case handlers.onOtUpdateError:
+                    this.socket.on('otUpdateError', (...args:any[]) => {
+                        handler(...args);
                     });
                     break;
                 case handlers.onDisconnected:
