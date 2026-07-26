@@ -9,19 +9,18 @@ const IGNORE_SETTING_KEY = 'ignore-patterns';
 type FileCache = {date:number, hash:number};
 
 /**
- * Returns a hash code from a string
- * @param  {String} str The string to hash.
- * @return {Number}    A 32bit integer
- * @see http://werxltd.com/wp/2010/05/13/javascript-implementation-of-javas-string-hashcode-method/
+ * Returns a hash code over the raw bytes.
+ * Hashing bytes (not a decoded string) keeps binary files (PDF, images)
+ * distinguishable: utf-8 decoding maps all invalid sequences to the same
+ * replacement character, which used to make different binaries collide.
+ * @return {Number} A 32bit integer, -1 for missing content
  */
 function hashCode(content?: Uint8Array): number {
     if (content===undefined) { return -1; }
-    const str = new TextDecoder().decode(content);
 
     let hash = 0;
-    for (let i = 0, len = str.length; i < len; i++) {
-        const chr = str.charCodeAt(i);
-        hash = (hash << 5) - hash + chr;
+    for (let i = 0, len = content.length; i < len; i++) {
+        hash = (hash << 5) - hash + content[i];
         hash |= 0; // Convert to 32bit integer
     }
     return hash;
@@ -41,6 +40,8 @@ export class LocalReplicaSCMProvider extends BaseSCM {
     private vfsWatcher?: vscode.FileSystemWatcher;
     private localWatcher?: vscode.FileSystemWatcher;
     private saveListener?: vscode.Disposable;
+    private syncQueue: Map<string, Promise<void>> = new Map();
+    private lastErrorNotice: number = 0;
     private ignorePatterns: string[] = [
         '**/.*',
         '**/.*/**',
@@ -57,6 +58,7 @@ export class LocalReplicaSCMProvider extends BaseSCM {
         '**/*.lot',
         '**/*.out',
         '**/*.run.xml',
+        '**/*.spl',
         '**/*.synctex(busy)',
         '**/*.synctex.gz',
         '**/*.toc',
@@ -167,6 +169,10 @@ export class LocalReplicaSCMProvider extends BaseSCM {
         return false;
     }
 
+    private clearBypassCache(relPath: string) {
+        this.bypassCache.delete(relPath);
+    }
+
     private setBypassCache(relPath: string, content?: Uint8Array, action?: 'push'|'pull') {
         const date = Date.now();
         const hash = hashCode(content);
@@ -213,8 +219,9 @@ export class LocalReplicaSCMProvider extends BaseSCM {
             title: vscode.l10n.t('Sync Files'),
             cancellable: true,
         }, async (progress, token) => {
-            // breadth-first search for the files
-            const files: [string,string][] = [];
+            // breadth-first search for the remote files
+            const remoteFiles: [string,string][] = [];
+            const remoteDirs = new Set<string>([root]);
             const queue: string[] = [root];
             while (queue.length!==0) {
                 const nextRoot = queue.shift();
@@ -228,44 +235,143 @@ export class LocalReplicaSCMProvider extends BaseSCM {
                         continue;
                     }
                     if (type === vscode.FileType.Directory) {
+                        remoteDirs.add(relPath+'/');
                         queue.push(relPath+'/');
                     } else {
-                        files.push([name, relPath]);
+                        remoteFiles.push([name, relPath]);
                     }
                 }
             }
 
-            // sync the files
-            const total = files.length;
-            for (let i=0; i<total; i++) {
-                const [name, relPath] = files[i];
+            // breadth-first search for the local files (parents before children)
+            const localFiles: string[] = [];
+            const localDirs: string[] = [];
+            const localQueue: string[] = [root];
+            while (localQueue.length!==0) {
+                const nextRoot = localQueue.shift();
+                const localUri = vscode.Uri.joinPath(this.baseUri, nextRoot!);
+                let items: [string, vscode.FileType][] = [];
+                try {
+                    items = await vscode.workspace.fs.readDirectory(localUri);
+                } catch { /* local folder may not exist yet on first sync */ }
+                if (token.isCancellationRequested) { return undefined; }
+                //
+                for (const [name, type] of items) {
+                    const relPath = nextRoot + name;
+                    if (this.matchIgnorePatterns(relPath)) {
+                        continue;
+                    }
+                    // bitwise checks: symlinked entries carry the SymbolicLink flag
+                    if (type & vscode.FileType.Directory) {
+                        localDirs.push(relPath+'/');
+                        localQueue.push(relPath+'/');
+                    } else if (type & vscode.FileType.File) {
+                        localFiles.push(relPath);
+                    }
+                }
+            }
+
+            const remoteFileSet = new Set(remoteFiles.map(([,relPath]) => relPath));
+            const localOnlyFiles = localFiles.filter(relPath => !remoteFileSet.has(relPath));
+            const failures: string[] = [];
+
+            // create local-only folders on the remote side (parents first)
+            for (const dirPath of localDirs) {
+                if (token.isCancellationRequested) { return false; }
+                if (remoteDirs.has(dirPath)) { continue; }
+                try {
+                    await vscode.workspace.fs.createDirectory(this.vfs.pathToUri(dirPath));
+                    remoteDirs.add(dirPath);
+                    this.setBypassCache(dirPath.replace(/\/$/, ''), new Uint8Array());
+                } catch (error) {
+                    console.error(`Sync folder "${dirPath}" failed:`, error);
+                    failures.push(dirPath);
+                }
+            }
+
+            const total = remoteFiles.length + localOnlyFiles.length;
+
+            // upload local-only files: they were created while the project was
+            // not connected (e.g., VS Code closed) and only exist locally
+            for (const relPath of localOnlyFiles) {
+                if (token.isCancellationRequested) { return false; }
+                progress.report({increment: 100/total, message: relPath});
+                const vfsUri = this.vfs.pathToUri(relPath);
+                try {
+                    const content = await this.readFile(relPath);
+                    if (content===undefined) { continue; }
+                    this.setBypassCache(relPath, content);
+                    await vscode.workspace.fs.writeFile(vfsUri, content);
+                    this.baseCache[relPath] = content;
+                    await vscode.workspace.fs.readFile(vfsUri); // update remote cache
+                } catch (error) {
+                    this.clearBypassCache(relPath);
+                    console.error(`Sync upload "${relPath}" failed:`, error);
+                    failures.push(relPath);
+                }
+            }
+
+            // sync the remote files
+            for (const [name, relPath] of remoteFiles) {
                 const vfsUri = this.vfs.pathToUri(relPath);
                 if (token.isCancellationRequested) { return false; }
                 progress.report({increment: 100/total, message: relPath});
                 //
-                const baseContent = this.baseCache[relPath];
-                const localContent = await this.readFile(relPath);
-                const remoteContent = await vscode.workspace.fs.readFile(vfsUri);
-                if (baseContent===undefined || localContent===undefined) {
-                    this.setBypassCache(relPath, remoteContent);
-                    await this.writeFile(relPath, remoteContent);
-                } else {
-                    const dmp = new DiffMatchPatch();
-                    const baseContentStr = new TextDecoder().decode(baseContent);
-                    const localContentStr = new TextDecoder().decode(localContent);
-                    const remoteContentStr = new TextDecoder().decode(remoteContent);
-                    // merge local and remote changes
-                    const localPatches = dmp.patch_make( baseContentStr, localContentStr );
-                    const remotePatches = dmp.patch_make( baseContentStr, remoteContentStr );
-                    const [mergedContentStr, _results] = dmp.patch_apply( remotePatches, localContentStr );
-                    // write the merged content to local
-                    const mergedContent = new TextEncoder().encode(mergedContentStr);
-                    await this.writeFile(relPath, mergedContent);
-                    // write the merged content to remote
-                    if (localPatches.length!==0) {
-                        await vscode.workspace.fs.writeFile(vfsUri, mergedContent);
+                try {
+                    const baseContent = this.baseCache[relPath];
+                    const localContent = await this.readFile(relPath);
+                    const remoteContent = await vscode.workspace.fs.readFile(vfsUri);
+                    if (localContent===undefined) {
+                        // no local copy yet --> pull the remote one
+                        this.setBypassCache(relPath, remoteContent);
+                        await this.writeFile(relPath, remoteContent);
+                        this.baseCache[relPath] = remoteContent;
+                    } else if (baseContent===undefined) {
+                        // no common base (fresh start or reconnect):
+                        // never clobber the local copy — the server keeps full
+                        // history, the local folder does not, so local wins
+                        if (hashCode(localContent)===hashCode(remoteContent)) {
+                            this.setBypassCache(relPath, remoteContent);
+                            this.baseCache[relPath] = remoteContent;
+                        } else {
+                            this.setBypassCache(relPath, localContent);
+                            await vscode.workspace.fs.writeFile(vfsUri, localContent);
+                            this.baseCache[relPath] = localContent;
+                            await vscode.workspace.fs.readFile(vfsUri); // update remote cache
+                        }
+                    } else {
+                        const dmp = new DiffMatchPatch();
+                        const baseContentStr = new TextDecoder().decode(baseContent);
+                        const localContentStr = new TextDecoder().decode(localContent);
+                        const remoteContentStr = new TextDecoder().decode(remoteContent);
+                        // merge local and remote changes
+                        const localPatches = dmp.patch_make( baseContentStr, localContentStr );
+                        const remotePatches = dmp.patch_make( baseContentStr, remoteContentStr );
+                        const [mergedContentStr, _results] = dmp.patch_apply( remotePatches, localContentStr );
+                        // write the merged content to local
+                        const mergedContent = new TextEncoder().encode(mergedContentStr);
+                        this.setBypassCache(relPath, mergedContent);
+                        await this.writeFile(relPath, mergedContent);
+                        this.baseCache[relPath] = mergedContent;
+                        // write the merged content to remote
+                        if (localPatches.length!==0) {
+                            await vscode.workspace.fs.writeFile(vfsUri, mergedContent);
+                        }
                     }
+                } catch (error) {
+                    this.clearBypassCache(relPath);
+                    console.error(`Sync "${relPath}" failed:`, error);
+                    failures.push(relPath);
                 }
+            }
+
+            if (failures.length!==0) {
+                vscode.window.showWarningMessage(
+                    vscode.l10n.t('Sync failed for {count} file(s): {paths}', {
+                        count: failures.length,
+                        paths: failures.slice(0,3).join(', ') + (failures.length>3 ? ', …' : ''),
+                    })
+                );
             }
 
             return true;
@@ -286,40 +392,118 @@ export class LocalReplicaSCMProvider extends BaseSCM {
         return false;
     }
 
-    private async applySync(action:'push'|'pull', type: 'update'|'delete', relPath:string, fromUri: vscode.Uri, toUri: vscode.Uri) {
-        this.status = {status: action, message: `${type}: ${relPath}`};
+    /**
+     * Serialize sync operations per path, so that a push and a pull on the
+     * same file never interleave their read/write steps.
+     */
+    private enqueueSync(relPath: string, task: () => Promise<void>): Promise<void> {
+        const prev = this.syncQueue.get(relPath) ?? Promise.resolve();
+        const next = prev.then(task, task);
+        this.syncQueue.set(relPath, next);
+        next.catch(()=>{}).then(() => {
+            if (this.syncQueue.get(relPath)===next) { this.syncQueue.delete(relPath); }
+        });
+        return next;
+    }
 
-        await (async () => {
-            if (type==='delete') {
-                const newContent = undefined;
-                if (this.bypassSync(action, type, relPath, newContent)) { return; }
-                delete this.baseCache[relPath];
-                await vscode.workspace.fs.delete(toUri, {recursive:true});
-            } else {
-                const stat = await vscode.workspace.fs.stat(fromUri);
-                if (stat.type===vscode.FileType.Directory) {
-                    const newContent = new Uint8Array();
+    /**
+     * Create missing ancestor folders on the remote side before pushing a
+     * file, so that a new file inside a new folder does not race the
+     * folder's own creation event and fail.
+     */
+    private async ensureRemoteParents(relPath: string) {
+        const parts = relPath.split('/').filter(part => part!=='');
+        parts.pop(); // drop the file name
+        let current = '';
+        for (const part of parts) {
+            current += '/' + part;
+            const uri = this.vfs.pathToUri(current);
+            try {
+                await vscode.workspace.fs.stat(uri);
+            } catch {
+                await vscode.workspace.fs.createDirectory(uri);
+            }
+        }
+    }
+
+    private reportSyncError(action:'push'|'pull', relPath: string, error: any) {
+        console.error(`Sync ${action} failed for "${relPath}":`, error);
+        const now = Date.now();
+        if (now - this.lastErrorNotice > 10*1000) {
+            this.lastErrorNotice = now;
+            const direction = action==='push' ? vscode.l10n.t('to server') : vscode.l10n.t('to local');
+            vscode.window.showWarningMessage(
+                vscode.l10n.t('Sync {direction} failed for "{path}". It will be retried on the next change or reload.', {direction, path: relPath})
+            );
+        }
+    }
+
+    private async applySync(action:'push'|'pull', type: 'update'|'delete', relPath:string, fromUri: vscode.Uri, toUri: vscode.Uri) {
+        return this.enqueueSync(relPath, async () => {
+            this.status = {status: action, message: `${type}: ${relPath}`};
+            try {
+                if (type==='delete') {
+                    const newContent = undefined;
                     if (this.bypassSync(action, type, relPath, newContent)) { return; }
-                    await vscode.workspace.fs.createDirectory(toUri);
-                }
-                else if (stat.type===vscode.FileType.File) {
+                    delete this.baseCache[relPath];
                     try {
-                        const newContent = await vscode.workspace.fs.readFile(fromUri);
-                        if (this.bypassSync(action, type, relPath, newContent)) { return; }
-                        await vscode.workspace.fs.writeFile(toUri, newContent);
-                        this.baseCache[relPath] = newContent;
-                        if (action==='push') { await vscode.workspace.fs.readFile(toUri); } // update remote cache
+                        await vscode.workspace.fs.delete(toUri, {recursive:true});
+                        // align both sides, so the echo event of this deletion is bypassed
+                        this.setBypassCache(relPath, newContent);
                     } catch (error) {
-                        console.error(error);
+                        if (error instanceof vscode.FileSystemError && error.code==='FileNotFound') {
+                            this.setBypassCache(relPath, newContent);
+                        } else {
+                            this.clearBypassCache(relPath);
+                            this.reportSyncError(action, relPath, error);
+                        }
+                    }
+                } else {
+                    let stat: vscode.FileStat;
+                    try {
+                        stat = await vscode.workspace.fs.stat(fromUri);
+                    } catch {
+                        return; // source vanished in the meantime (e.g., temporary file)
+                    }
+                    if (stat.type & vscode.FileType.Directory) {
+                        const newContent = new Uint8Array();
+                        if (this.bypassSync(action, type, relPath, newContent)) { return; }
+                        try {
+                            await vscode.workspace.fs.createDirectory(toUri);
+                            this.setBypassCache(relPath, newContent);
+                        } catch (error) {
+                            this.clearBypassCache(relPath);
+                            this.reportSyncError(action, relPath, error);
+                        }
+                    }
+                    else if (stat.type & vscode.FileType.File) {
+                        try {
+                            const newContent = await vscode.workspace.fs.readFile(fromUri);
+                            if (this.bypassSync(action, type, relPath, newContent)) { return; }
+                            if (action==='push') { await this.ensureRemoteParents(relPath); }
+                            await vscode.workspace.fs.writeFile(toUri, newContent);
+                            this.baseCache[relPath] = newContent;
+                            // align both sides of the bypass cache: after a successful
+                            // sync, local and remote hold the same content, so the echo
+                            // event is bypassed and later edits propagate normally
+                            this.setBypassCache(relPath, newContent);
+                            if (action==='push') { await vscode.workspace.fs.readFile(toUri); } // update remote cache
+                        } catch (error) {
+                            // forget the recorded hash, otherwise re-saving the very
+                            // same content would be treated as "already synced" and
+                            // this file would never be pushed again
+                            this.clearBypassCache(relPath);
+                            this.reportSyncError(action, relPath, error);
+                        }
+                    }
+                    else {
+                        console.error(`Unknown file type: ${stat.type}`);
                     }
                 }
-                else {
-                    console.error(`Unknown file type: ${stat.type}`);
-                }
+            } finally {
+                this.status = {status: 'idle', message: ''};
             }
-        })();
-
-        this.status = {status: 'idle', message: ''};
+        });
     }
 
     private async syncFromVFS(vfsUri: vscode.Uri, type: 'update'|'delete') {
@@ -327,7 +511,7 @@ export class LocalReplicaSCMProvider extends BaseSCM {
         pathParts.at(-1)==='' && pathParts.pop(); // remove the last empty string
         const relPath = ('/' + pathParts.join('/'));
         const localUri = vscode.Uri.joinPath(this.baseUri, relPath);
-        this.applySync('pull', type, relPath, vfsUri, localUri);
+        return this.applySync('pull', type, relPath, vfsUri, localUri);
     }
 
     private async syncToVFS(localUri: vscode.Uri, type: 'update'|'delete') {
@@ -335,21 +519,21 @@ export class LocalReplicaSCMProvider extends BaseSCM {
         const basePath = this.baseUri.path;
         const relPath = localUri.path.slice(basePath.length);
         const vfsUri = this.vfs.pathToUri(relPath);
-        this.applySync('push', type, relPath, localUri, vfsUri);
+        return this.applySync('push', type, relPath, localUri, vfsUri);
     }
 
     /**
-     * Push a saved document to the VFS.
-     * Only fires for explicit user saves in the editor, not for external
-     * file modifications (git, compilation tools, etc.).
-     * This is the general fix for issues #299 and #323.
+     * Push a saved document to the VFS immediately, without waiting for the
+     * file system watcher to deliver the change event. The duplicated push
+     * from the watcher is deduplicated by the bypass cache (same hash).
      */
-    private onDocumentSaved(doc: vscode.TextDocument) {
+    private onDocumentSaved(doc: vscode.TextDocument): Promise<void>|undefined {
         const docUri = doc.uri;
+        if (docUri.scheme!==this.baseUri.scheme) { return; }
         // Only sync files within our baseUri (ensure path separator boundary)
         const basePath = this.baseUri.path.endsWith('/') ? this.baseUri.path : this.baseUri.path + '/';
         if (!docUri.path.startsWith(basePath)) { return; }
-        this.syncToVFS(docUri, 'update');
+        return this.syncToVFS(docUri, 'update');
     }
 
     private async initWatch() {
@@ -376,9 +560,9 @@ export class LocalReplicaSCMProvider extends BaseSCM {
         );
         await this.overwrite();
 
-        // Listen for explicit user saves (not file system changes) to push local edits.
-        // File system watchers would also fire for git operations, compilation outputs,
-        // and other external modifications, causing unwanted sync (issues #299, #323).
+        // Push editor saves immediately; the watcher below covers changes made
+        // by external tools (scripts, git, formatters, AI assistants, ...).
+        // Build artifacts are excluded via the ignore patterns (issues #299, #323).
         this.saveListener = vscode.workspace.onDidSaveTextDocument(
             doc => this.onDocumentSaved(doc)
         );
@@ -388,8 +572,8 @@ export class LocalReplicaSCMProvider extends BaseSCM {
             this.vfsWatcher.onDidChange(async uri => await this.syncFromVFS(uri, 'update')),
             this.vfsWatcher.onDidCreate(async uri => await this.syncFromVFS(uri, 'update')),
             this.vfsWatcher.onDidDelete(async uri => await this.syncFromVFS(uri, 'delete')),
-            // sync from local to vfs: file updates via editor saves (onDidSaveTextDocument above),
-            // file creation and deletion still via watcher (these are explicit user actions)
+            // sync from local to vfs
+            this.localWatcher.onDidChange(async uri => await this.syncToVFS(uri, 'update')),
             this.localWatcher.onDidCreate(async uri => await this.syncToVFS(uri, 'update')),
             this.localWatcher.onDidDelete(async uri => await this.syncToVFS(uri, 'delete')),
             // include save listener for proper disposal

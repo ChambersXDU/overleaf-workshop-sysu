@@ -667,6 +667,8 @@ export class VirtualFileSystem extends vscode.Disposable {
             const _res = await this.api.addDoc(identity, this.projectId, parentFolder._id, fileName);
             if (_res.type==='success') {
                 res = _res.entity;
+            } else {
+                throw new Error(_res.message ?? `addDoc failed: ${fileName}`);
             }
         } else {
             const parentFolderId = parentFolder._id;
@@ -674,9 +676,9 @@ export class VirtualFileSystem extends vscode.Disposable {
             if (_res.type==='success' && _res.entity!==undefined) {
                 res = _res.entity;
             } else {
-                if (_res.message!==undefined) {
-                    vscode.window.showErrorMessage(_res.message);
-                }
+                // let the caller (e.g., local replica sync) see the failure,
+                // otherwise the file silently never reaches the server
+                throw new Error(_res.message ?? `uploadFile failed: ${fileName}`);
             }
         }
         if (res && res._type) {
@@ -837,6 +839,15 @@ export class VirtualFileSystem extends vscode.Disposable {
             const doc = fileEntity as DocumentEntity;
             const _content = new TextDecoder().decode(content);
             if (doc.version===undefined || doc.localCache===undefined || doc.remoteCache===undefined) {
+                // the doc has not been joined yet (e.g., first push after a
+                // reconnect): join it now instead of silently dropping the write
+                const res = await this.socket.joinDoc(doc._id);
+                const remoteContent = res.docLines.join('\n');
+                doc.version = res.version;
+                doc.remoteCache = remoteContent;
+                doc.localCache  = remoteContent;
+            }
+            if (doc.version===undefined || doc.localCache===undefined || doc.remoteCache===undefined) {
                 return;
             }
             const dmp = new DiffMatchPatch();
@@ -903,9 +914,7 @@ export class VirtualFileSystem extends vscode.Disposable {
                 {type: vscode.FileChangeType.Created, uri: uri},
             ]);
         } else {
-            if (res.message!==undefined) {
-                vscode.window.showErrorMessage(res.message);
-            }
+            throw new Error(res.message ?? `addFolder failed: ${folderName}`);
         }
     }
 
